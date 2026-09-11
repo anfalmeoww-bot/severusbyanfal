@@ -1,5 +1,7 @@
 const OWNER_PHONE = '0505298177';
 const storageKey = 'severus-by-anfal-state';
+const SUPABASE_URL = 'https://klmqqcnkxvxzzxsrxqeo.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtsbXFxY25reHZ4enp4c3J4cWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxMjQ0NTcsImV4cCI6MjEwNDcwMDQ1N30.dWkOlUhVepatyVyyv4E3QKkbRurLSDeHHUxTgV0hz6Y';
 
 const defaultState = {
   users: [],
@@ -21,6 +23,31 @@ const app = document.querySelector('#app');
 const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
 const saveSession = () => localStorage.setItem('severus-by-anfal-session', JSON.stringify(session));
 const saveCart = () => localStorage.setItem('severus-by-anfal-cart', JSON.stringify(cart));
+const supabaseHeaders = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' };
+async function supabaseRequest(path, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: { ...supabaseHeaders, ...(options.headers || {}) } });
+  if (!response.ok) throw new Error(`Supabase ${response.status}`);
+  return response.status === 204 ? null : response.json();
+}
+async function loadCloudState() {
+  try {
+    const [products, categories] = await Promise.all([supabaseRequest('products?select=*&order=id'), supabaseRequest('categories?select=*&order=id')]);
+    state.products = products;
+    state.categories = categories.map(category => category.name);
+    save();
+  } catch (error) {
+    console.warn('Cloud data unavailable; using local data.', error);
+  }
+}
+async function createCloudProduct(product) {
+  return supabaseRequest('products', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(product) });
+}
+async function deleteCloudProduct(id) {
+  await supabaseRequest(`products?id=eq.${id}`, { method: 'DELETE' });
+}
+async function createCloudCategory(name) {
+  await supabaseRequest('categories', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ name }) });
+}
 const money = value => `${value.toFixed(2)} ر.س`;
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 
@@ -40,7 +67,7 @@ function authView(mode = 'login') {
   document.querySelector('[data-auth-mode]').addEventListener('click', event => authView(event.currentTarget.dataset.authMode));
 }
 
-function handleAuth(event) {
+async function handleAuth(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget));
   const phone = data.phone.replace(/\s/g, '');
@@ -54,7 +81,9 @@ function handleAuth(event) {
     if (!existing) return showToast('هذا الرقم غير مسجل، أنشئي حسابًا أولًا');
     session = { phone, name: existing.name, isOwner: false };
   }
-  saveSession(); renderStore();
+  saveSession();
+  await loadCloudState();
+  renderStore();
 }
 
 function categories() { return ['الكل', ...new Set(state.categories.length ? state.categories : state.products.map(product => product.category))]; }
@@ -74,13 +103,13 @@ function bindStoreEvents() {
   document.querySelectorAll('[data-category]').forEach(button => button.addEventListener('click', () => { selectedCategory = button.dataset.category; renderStore(); }));
   document.querySelectorAll('[data-add]').forEach(button => button.addEventListener('click', () => addToCart(Number(button.dataset.add))));
   document.querySelectorAll('[data-product]').forEach(item => item.addEventListener('click', () => showProduct(Number(item.dataset.product))));
-  document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => { state.products = state.products.filter(product => product.id !== Number(button.dataset.delete)); save(); renderStore(); showToast('המוצר הוסר'); }));
+  document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', async () => { const id = Number(button.dataset.delete); try { await deleteCloudProduct(id); } catch (error) { console.error(error); return showToast('تعذر حذف المنتج من قاعدة البيانات'); } state.products = state.products.filter(product => product.id !== id); save(); renderStore(); showToast('تم حذف المنتج'); }));
   document.querySelector('[data-action="cart"]')?.addEventListener('click', showCart);
   document.querySelector('[data-action="logout"]')?.addEventListener('click', () => { session = null; saveSession(); authView(); });
   document.querySelector('[data-action="owner"]')?.addEventListener('click', () => { session.isOwner ? renderStore() : showToast('לוח הניהול זמין רק לבעלת החנות'); });
   document.querySelector('[data-action="owner-view"]')?.addEventListener('click', () => { session.isOwner = false; renderStore(); });
-  document.querySelector('#category-form')?.addEventListener('submit', event => { event.preventDefault(); const category = new FormData(event.currentTarget).get('category').trim(); if (!state.categories.includes(category)) state.categories.push(category); save(); renderStore(); showToast('تمت إضافة التصنيف'); });
-  document.querySelector('#product-form')?.addEventListener('submit', event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); state.products.unshift({ id: Date.now(), name: data.name, category: data.category, price: Number(data.price), symbol: data.symbol, description: data.description }); save(); renderStore(); showToast('تم نشر المنتج'); });
+  document.querySelector('#category-form')?.addEventListener('submit', async event => { event.preventDefault(); const category = new FormData(event.currentTarget).get('category').trim(); if (state.categories.includes(category)) return; try { await createCloudCategory(category); } catch (error) { console.error(error); return showToast('تعذر حفظ التصنيف في قاعدة البيانات'); } state.categories.push(category); save(); renderStore(); showToast('تمت إضافة التصنيف'); });
+  document.querySelector('#product-form')?.addEventListener('submit', async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); const product = { name: data.name, category: data.category, price: Number(data.price), symbol: data.symbol, description: data.description }; let created; try { [created] = await createCloudProduct(product); } catch (error) { console.error(error); return showToast('تعذر حفظ المنتج في قاعدة البيانات'); } state.products.unshift(created); save(); renderStore(); showToast('تم نشر المنتج'); });
 }
 
 function addToCart(id) { const item = cart.find(entry => entry.id === id); if (item) item.quantity += 1; else cart.push({ id, quantity: 1 }); saveCart(); renderStore(); showToast('تمت إضافة المنتج للسلة'); }
@@ -100,4 +129,8 @@ window.addEventListener('storage', event => {
   showToast('تم تحديث المنتجات');
 });
 
-renderStore();
+if (session) {
+  loadCloudState().finally(renderStore);
+} else {
+  renderStore();
+}
