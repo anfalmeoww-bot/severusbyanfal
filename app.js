@@ -56,7 +56,8 @@ async function createCloudCategory(name) {
   await supabaseRequest('categories', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ name }) });
 }
 async function deleteCloudCategory(name) {
-  await supabaseRequest(`categories?name=eq.${encodeURIComponent(name)}`, { method: 'DELETE' });
+  const deleted = await supabaseRequest(`categories?name=eq.${encodeURIComponent(name)}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+  if (!deleted?.length) throw new Error('Category was not deleted');
 }
 const money = value => `${value.toFixed(2)} ر.س`;
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
