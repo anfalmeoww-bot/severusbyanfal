@@ -64,6 +64,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .product-card { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--white); box-shadow: 0 7px 25px rgba(55,117,142,.05); }
 .product-visual { height: 185px; display: grid; place-items: center; color: var(--ink); background: linear-gradient(135deg, #dff8fc, #a9e4f3); font-size: 3rem; cursor: pointer; }
 .product-image { width: 100%; height: 100%; object-fit: cover; }
+.no-image { color: var(--muted); font-size: .82rem; }
 .product-card:nth-child(3n+2) .product-visual { background: linear-gradient(135deg, #e8f5f1, #bfe8db); }
 .product-card:nth-child(3n) .product-visual { background: linear-gradient(135deg, #fff0df, #ffd7aa); }
 .product-info { padding: 16px; }
