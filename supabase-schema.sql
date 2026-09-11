@@ -10,9 +10,12 @@ create table if not exists public.products (
   category text not null,
   price numeric(10, 2) not null default 0,
   symbol text not null default '✦',
+  image_url text,
   description text not null default '',
   created_at timestamptz not null default now()
 );
+
+alter table public.products add column if not exists image_url text;
 
 alter table public.categories enable row level security;
 alter table public.products enable row level security;
