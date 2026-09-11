@@ -26,7 +26,12 @@ const saveCart = () => localStorage.setItem('severus-by-anfal-cart', JSON.string
 const supabaseHeaders = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' };
 async function supabaseRequest(path, options = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: { ...supabaseHeaders, ...(options.headers || {}) } });
-  if (!response.ok) throw new Error(`Supabase ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`Supabase ${response.status}`);
+    error.status = response.status;
+    error.detail = await response.text();
+    throw error;
+  }
   return response.status === 204 ? null : response.json();
 }
 async function loadCloudState() {
@@ -108,7 +113,7 @@ function bindStoreEvents() {
   document.querySelector('[data-action="logout"]')?.addEventListener('click', () => { session = null; saveSession(); authView(); });
   document.querySelector('[data-action="owner"]')?.addEventListener('click', () => { session.isOwner ? renderStore() : showToast('לוח הניהול זמין רק לבעלת החנות'); });
   document.querySelector('[data-action="owner-view"]')?.addEventListener('click', () => { session.isOwner = false; renderStore(); });
-  document.querySelector('#category-form')?.addEventListener('submit', async event => { event.preventDefault(); const category = new FormData(event.currentTarget).get('category').trim(); if (state.categories.includes(category)) return; try { await createCloudCategory(category); } catch (error) { console.error(error); return showToast('تعذر حفظ التصنيف في قاعدة البيانات'); } state.categories.push(category); save(); renderStore(); showToast('تمت إضافة التصنيف'); });
+  document.querySelector('#category-form')?.addEventListener('submit', async event => { event.preventDefault(); const category = new FormData(event.currentTarget).get('category').trim(); if (state.categories.includes(category)) return showToast('هذا التصنيف موجود بالفعل'); try { await createCloudCategory(category); } catch (error) { console.error(error); return showToast(error.status === 409 ? 'هذا التصنيف موجود بالفعل' : 'تعذر حفظ التصنيف في قاعدة البيانات'); } state.categories.push(category); save(); renderStore(); showToast('تمت إضافة التصنيف'); });
   document.querySelector('#product-form')?.addEventListener('submit', async event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); const product = { name: data.name, category: data.category, price: Number(data.price), symbol: data.symbol, description: data.description }; let created; try { [created] = await createCloudProduct(product); } catch (error) { console.error(error); return showToast('تعذر حفظ المنتج في قاعدة البيانات'); } state.products.unshift(created); save(); renderStore(); showToast('تم نشر المنتج'); });
 }
 
