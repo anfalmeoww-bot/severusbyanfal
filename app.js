@@ -18,6 +18,7 @@ let state = JSON.parse(localStorage.getItem(storageKey) || 'null') || defaultSta
 let session = JSON.parse(localStorage.getItem('severus-by-anfal-session') || 'null');
 let cart = JSON.parse(localStorage.getItem('severus-by-anfal-cart') || '[]');
 let selectedCategory = 'الكل';
+let cloudSyncTimer;
 
 const app = document.querySelector('#app');
 const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
@@ -98,6 +99,18 @@ function renderStore() {
   if (!session) return authView();
   app.innerHTML = `${header()}<main class="page">${session.isOwner ? `<div class="owner-banner"><div><strong>لوحة صاحبة المتجر</strong><span>أنتِ الآن في وضع الإدارة. أضيفي منتجاتك ورتبي تصنيفاتك.</span></div><button class="secondary" data-action="owner-view">مشاهدة المتجر</button></div>` : ''}<section class="hero"><div><span class="eyebrow">${session.isOwner ? 'إدارة المتجر' : 'منتجات مختارة لك'}</span><h1>مساحتك<br>تأخذ شكلها.</h1><p>${session.isOwner ? 'أديري المنتجات والتصنيفات من مكان واحد.' : 'تصفحي التصاميم، اختاري ما يناسبك، وخذيها معك بخطوة.'}</p></div><div class="hero-note">✦ دفع سريع وآمن<br>Apple Pay · Visa · Mastercard</div></section>${session.isOwner ? ownerPanel() : customerStore()}</main>`;
   bindStoreEvents();
+  startCloudSync();
+}
+
+function startCloudSync() {
+  clearInterval(cloudSyncTimer);
+  if (!session || session.isOwner) return;
+  cloudSyncTimer = setInterval(async () => {
+    const previous = JSON.stringify({ products: state.products, categories: state.categories });
+    await loadCloudState();
+    const current = JSON.stringify({ products: state.products, categories: state.categories });
+    if (current !== previous) renderStore();
+  }, 5000);
 }
 
 function customerStore() { return `<div class="store-layout"><aside class="sidebar"><h3>تصنيفات المتجر</h3><div class="category-list">${categories().map(category => `<button class="category-item ${selectedCategory === category ? 'active' : ''}" data-category="${escapeHtml(category)}"><span>${escapeHtml(category)}</span><span class="category-count">${category === 'الكل' ? state.products.length : state.products.filter(product => product.category === category).length}</span></button>`).join('')}</div></aside><section class="products-area"><div class="section-row"><h2>${escapeHtml(selectedCategory)}</h2><span class="eyebrow">${state.products.filter(product => selectedCategory === 'الكل' || product.category === selectedCategory).length} منتجات</span></div><div class="products">${state.products.filter(product => selectedCategory === 'الكل' || product.category === selectedCategory).map(productCard).join('') || '<div class="empty-state">لا توجد منتجات في هذا التصنيف بعد.</div>'}</div></section></div>`; }
