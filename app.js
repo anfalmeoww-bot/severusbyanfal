@@ -21,6 +21,7 @@ let selectedCategory = 'الكل';
 let cloudSyncTimer;
 
 const app = document.querySelector('#app');
+if (localStorage.getItem('severus-theme') === 'dark') document.body.classList.add('blue-dark');
 const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
 const saveSession = () => localStorage.setItem('severus-by-anfal-session', JSON.stringify(session));
 const saveCart = () => localStorage.setItem('severus-by-anfal-cart', JSON.stringify(cart));
@@ -62,6 +63,16 @@ async function deleteCloudCategory(name) {
   const deleted = await supabaseRequest(`categories?name=eq.${encodeURIComponent(name)}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
   if (!deleted?.length) throw new Error('Category was not deleted');
 }
+async function createCloudOrder(order) {
+  return supabaseRequest('orders', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(order) });
+}
+async function loadOrders(forOwner = false) {
+  const query = forOwner ? 'orders?select=*&order=created_at.desc' : `orders?select=*&phone=eq.${encodeURIComponent(session.phone)}&order=created_at.desc`;
+  return supabaseRequest(query);
+}
+async function updateCloudOrder(id, status) {
+  return supabaseRequest(`orders?id=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ status }) });
+}
 const money = value => `${value.toFixed(2)} ر.س`;
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
 
@@ -71,7 +82,30 @@ function logo() {
 
 function header() {
   const count = cart.reduce((sum, item) => sum + item.quantity, 0);
-  return `<header class="app-header"><div class="brand">${logo()}<span class="brand-name">SeverusByAnfal</span></div><div class="header-actions"><button class="profile-chip" data-action="owner">${session?.isOwner ? 'لوحة التحكم' : `أهلًا ${escapeHtml(session?.name || 'بك')}`}</button><button class="cart-btn" data-action="cart" aria-label="فتح السلة">السلة <span class="cart-count">${count}</span></button><button class="icon-btn" data-action="logout" title="تسجيل الخروج">↪</button></div></header>`;
+  return `<header class="app-header"><div class="brand">${logo()}<span class="brand-name">SeverusByAnfal</span></div><div class="header-actions"><button class="profile-chip" data-action="${session?.isOwner ? 'owner' : 'account'}">${session?.isOwner ? 'لوحة التحكم' : `أهلًا ${escapeHtml(session?.name || 'بك')}`}</button><button class="cart-btn" data-action="cart" aria-label="فتح السلة">السلة <span class="cart-count">${count}</span></button><button class="icon-btn" data-action="logout" title="تسجيل الخروج">↪</button></div></header>`;
+}
+
+function customerAccountMenu() {
+  showModal(`<div class="modal-head"><h2>حسابي</h2><button class="icon-btn" data-close>×</button></div><div class="account-menu"><button data-account="profile">حسابي وبياناتي</button><button data-account="orders">طلباتي</button><button data-account="settings">الإعدادات</button><button data-account="logout">تسجيل الخروج</button></div>`);
+  document.querySelectorAll('[data-account]').forEach(button => button.addEventListener('click', () => { const action = button.dataset.account; closeModal(); if (action === 'logout') { session = null; saveSession(); authView(); } else if (action === 'profile') showProfile(); else if (action === 'orders') showOrders(); else showSettings(); }));
+}
+
+function showProfile() {
+  showModal(`<div class="modal-head"><h2>حسابي وبياناتي</h2><button class="icon-btn" data-close>×</button></div><form id="profile-form"><label class="field">الاسم<input name="name" value="${escapeHtml(session.name || '')}" required></label><label class="field">رقم الجوال<input name="phone" value="${escapeHtml(session.phone || '')}" required></label><button class="primary" style="width:100%">حفظ التغييرات</button></form>`);
+  document.querySelector('#profile-form').addEventListener('submit', event => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget)); session.name = data.name; session.phone = data.phone; saveSession(); closeModal(); renderStore(); showToast('تم تحديث بياناتك'); });
+}
+
+async function showOrders() {
+  showModal('<div class="modal-head"><h2>طلباتي</h2><button class="icon-btn" data-close>×</button></div><div class="empty-state">جاري تحميل الطلبات...</div>');
+  try { const orders = await loadOrders(); const modal = document.querySelector('.modal'); modal.innerHTML = `<div class="modal-head"><h2>طلباتي</h2><button class="icon-btn" data-close>×</button></div>${orders.length ? orders.map(orderCard).join('') : '<div class="empty-state">لا توجد طلبات حتى الآن.</div>'}`; } catch (error) { showToast('تعذر تحميل الطلبات'); }
+}
+
+function orderCard(order) { return `<article class="order-card"><div class="order-top"><strong>طلب #${order.id}</strong><span class="order-status status-${escapeHtml(order.status)}">${escapeHtml(order.status)}</span></div><div class="order-details"><span>التاريخ: ${new Date(order.created_at).toLocaleDateString('ar-SA')}</span><span>طريقة الدفع: ${escapeHtml(order.payment_method)}</span><span>الإجمالي: ${money(Number(order.total))}</span></div><div class="order-items">${(order.items || []).map(item => `<div>${escapeHtml(item.name)} × ${item.quantity} <b>${money(Number(item.price) * item.quantity)}</b></div>`).join('')}</div></article>`; }
+
+function showSettings() {
+  showModal(`<div class="modal-head"><h2>الإعدادات</h2><button class="icon-btn" data-close>×</button></div><label class="field">اللغة<select id="language-setting"><option value="ar">العربية</option><option value="en">English</option></select></label><label class="field">مظهر الصفحة<select id="theme-setting"><option value="light">الأساسي</option><option value="dark">بلو دارك</option></select></label>`);
+  document.querySelector('#language-setting').addEventListener('change', event => { document.documentElement.lang = event.target.value; showToast(event.target.value === 'en' ? 'تغيير اللغة الكامل سيضاف لاحقًا' : 'تم اختيار العربية'); });
+  document.querySelector('#theme-setting').addEventListener('change', event => { document.body.classList.toggle('blue-dark', event.target.value === 'dark'); localStorage.setItem('severus-theme', event.target.value); });
 }
 
 function authView(mode = 'login') {
@@ -105,7 +139,7 @@ function productCard(product) { return `<article class="product-card"><div class
 
 function renderStore() {
   if (!session) return authView();
-  app.innerHTML = `${header()}<main class="page">${session.isOwner ? `<div class="owner-banner"><div><strong>لوحة صاحبة المتجر</strong><span>أنتِ الآن في وضع الإدارة. أضيفي منتجاتك ورتبي تصنيفاتك.</span></div><button class="secondary" data-action="owner-view">مشاهدة المتجر</button></div>` : ''}<section class="hero"><div><span class="eyebrow">${session.isOwner ? 'إدارة المتجر' : 'منتجات مختارة لك'}</span><h1>مساحتك<br>تأخذ شكلها.</h1><p>${session.isOwner ? 'أديري المنتجات والتصنيفات من مكان واحد.' : 'تصفحي التصاميم، اختاري ما يناسبك، وخذيها معك بخطوة.'}</p></div><div class="hero-note">✦ دفع سريع وآمن<br>Apple Pay · Visa · Mastercard</div></section>${session.isOwner ? ownerPanel() : customerStore()}</main>`;
+  app.innerHTML = `${header()}<main class="page">${session.isOwner ? `<div class="owner-banner"><div><strong>لوحة صاحبة المتجر</strong><span>أنتِ الآن في وضع الإدارة. أضيفي منتجاتك ورتبي تصنيفاتك.</span></div><div class="header-actions"><button class="secondary" data-action="orders-admin">الطلبات</button><button class="secondary" data-action="owner-view">مشاهدة المتجر</button></div></div>` : ''}<section class="hero"><div><span class="eyebrow">${session.isOwner ? 'إدارة المتجر' : 'منتجات مختارة لك'}</span><h1>مساحتك<br>تأخذ شكلها.</h1><p>${session.isOwner ? 'أديري المنتجات والتصنيفات من مكان واحد.' : 'تصفحي التصاميم، اختاري ما يناسبك، وخذيها معك بخطوة.'}</p></div><div class="hero-note">✦ دفع سريع وآمن<br>Apple Pay · Visa · Mastercard</div></section>${session.isOwner ? ownerPanel() : customerStore()}</main>`;
   bindStoreEvents();
   startCloudSync();
 }
@@ -132,6 +166,8 @@ function bindStoreEvents() {
   document.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', async () => { const id = Number(button.dataset.delete); try { await deleteCloudProduct(id); } catch (error) { console.error(error); return showToast('تعذر حذف المنتج من قاعدة البيانات'); } state.products = state.products.filter(product => product.id !== id); save(); renderStore(); showToast('تم حذف المنتج'); }));
   document.querySelectorAll('[data-delete-category]').forEach(button => button.addEventListener('click', async () => { const category = button.dataset.deleteCategory; if (state.products.some(product => product.category === category)) return showToast('احذفي منتجات هذا التصنيف أولًا'); try { await deleteCloudCategory(category); } catch (error) { console.error(error); return showToast('تعذر حذف التصنيف من قاعدة البيانات'); } state.categories = state.categories.filter(item => item !== category); save(); renderStore(); showToast('تم حذف التصنيف'); }));
   document.querySelector('[data-action="cart"]')?.addEventListener('click', showCart);
+  document.querySelector('[data-action="account"]')?.addEventListener('click', customerAccountMenu);
+  document.querySelector('[data-action="orders-admin"]')?.addEventListener('click', showAdminOrders);
   document.querySelector('[data-action="logout"]')?.addEventListener('click', () => { session = null; saveSession(); authView(); });
   document.querySelector('[data-action="owner"]')?.addEventListener('click', () => { session.isOwner ? renderStore() : showToast('לוח הניהול זמין רק לבעלת החנות'); });
   document.querySelector('[data-action="owner-view"]')?.addEventListener('click', () => { session.isOwner = false; renderStore(); });
@@ -141,7 +177,9 @@ function bindStoreEvents() {
 
 function addToCart(id) { const item = cart.find(entry => entry.id === id); if (item) item.quantity += 1; else cart.push({ id, quantity: 1 }); saveCart(); renderStore(); showToast('تمت إضافة المنتج للسلة'); }
 function showProduct(id) { const product = state.products.find(item => item.id === id); if (!product) return; showModal(`<div class="modal-head"><h2>${escapeHtml(product.name)}</h2><button class="icon-btn" data-close>×</button></div><div class="product-visual">${product.image_url ? `<img class="product-image" src="${escapeHtml(product.image_url)}" alt="${escapeHtml(product.name)}">` : '<span class="no-image">لا توجد صورة</span>'}</div><p style="line-height:1.9;color:var(--muted)">${escapeHtml(product.description)}</p><div class="total"><span>السعر</span><span>${money(product.price)}</span></div><button class="primary" style="width:100%" data-modal-add="${product.id}">أضيفي للسلة</button>`); document.querySelector('[data-modal-add]').addEventListener('click', () => { addToCart(product.id); closeModal(); }); }
-function showCart() { const items = cart.map(item => ({ ...item, product: state.products.find(product => product.id === item.id) })).filter(item => item.product); const total = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0); showModal(`<div class="modal-head"><h2>سلة مشترياتك</h2><button class="icon-btn" data-close>×</button></div>${items.length ? items.map(item => `<div class="cart-item"><div><strong>${escapeHtml(item.product.name)}</strong><small>${money(item.product.price)} × ${item.quantity}</small></div><div class="qty"><button data-qty="${item.id}" data-change="-1">−</button><span>${item.quantity}</span><button data-qty="${item.id}" data-change="1">+</button></div></div>`).join('') + `<div class="total"><span>الإجمالي</span><span>${money(total)}</span></div><div class="payment-methods"><button class="payment-method selected">Apple Pay</button><button class="payment-method">Visa</button><button class="payment-method">Mastercard</button></div><button class="primary" style="width:100%" data-checkout>إتمام الدفع · ${money(total)}</button>` : '<div class="empty-state">السلة فارغة حاليًا.</div>'}`); document.querySelectorAll('[data-qty]').forEach(button => button.addEventListener('click', () => { const item = cart.find(entry => entry.id === Number(button.dataset.qty)); item.quantity += Number(button.dataset.change); cart = cart.filter(entry => entry.quantity > 0); saveCart(); closeModal(); showCart(); })); document.querySelectorAll('.payment-method').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.payment-method').forEach(item => item.classList.remove('selected')); button.classList.add('selected'); })); document.querySelector('[data-checkout]')?.addEventListener('click', () => { closeModal(); showToast('واجهة الدفع جاهزة للربط ببوابة الدفع'); }); }
+function showCart() { const items = cart.map(item => ({ ...item, product: state.products.find(product => product.id === item.id) })).filter(item => item.product); const total = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0); showModal(`<div class="modal-head"><h2>سلة مشترياتك</h2><button class="icon-btn" data-close>×</button></div>${items.length ? items.map(item => `<div class="cart-item"><div><strong>${escapeHtml(item.product.name)}</strong><small>${money(item.product.price)} × ${item.quantity}</small></div><div class="qty"><button data-qty="${item.id}" data-change="-1">−</button><span>${item.quantity}</span><button data-qty="${item.id}" data-change="1">+</button></div></div>`).join('') + `<div class="total"><span>الإجمالي</span><span>${money(total)}</span></div><div class="payment-methods"><button class="payment-method selected" data-payment="Apple Pay">Apple Pay</button><button class="payment-method" data-payment="Visa">Visa</button><button class="payment-method" data-payment="Mastercard">Mastercard</button></div><button class="primary" style="width:100%" data-checkout>إتمام الدفع · ${money(total)}</button>` : '<div class="empty-state">السلة فارغة حاليًا.</div>'}`); document.querySelectorAll('[data-qty]').forEach(button => button.addEventListener('click', () => { const item = cart.find(entry => entry.id === Number(button.dataset.qty)); item.quantity += Number(button.dataset.change); cart = cart.filter(entry => entry.quantity > 0); saveCart(); closeModal(); showCart(); })); document.querySelectorAll('.payment-method').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.payment-method').forEach(item => item.classList.remove('selected')); button.classList.add('selected'); })); document.querySelector('[data-checkout]')?.addEventListener('click', async () => { const payment = document.querySelector('.payment-method.selected')?.dataset.payment || 'Apple Pay'; const order = { phone: session.phone, customer_name: session.name, items: items.map(item => ({ name: item.product.name, price: item.product.price, quantity: item.quantity })), total, payment_method: payment, status: 'بانتظار الدفع' }; try { await createCloudOrder(order); cart = []; saveCart(); closeModal(); showToast('تم إنشاء الطلب'); } catch (error) { console.error(error); showToast('تعذر إنشاء الطلب'); } }); }
+
+async function showAdminOrders() { showModal('<div class="modal-head"><h2>طلبات العملاء</h2><button class="icon-btn" data-close>×</button></div><div class="empty-state">جاري تحميل الطلبات...</div>'); try { const orders = await loadOrders(true); const modal = document.querySelector('.modal'); modal.innerHTML = `<div class="modal-head"><h2>طلبات العملاء</h2><button class="icon-btn" data-close>×</button></div>${orders.length ? orders.map(order => `${orderCard(order)}<label class="field">تحديث الحالة<select data-order-status="${order.id}">${['بانتظار الدفع', 'تم تأكيد الطلب', 'جاري التجهيز', 'تم التوصيل', 'ملغي', 'مرتجع', 'مسترد المبلغ'].map(status => `<option ${status === order.status ? 'selected' : ''}>${status}</option>`).join('')}</select></label>`).join('') : '<div class="empty-state">لا توجد طلبات.</div>'}`; document.querySelectorAll('[data-order-status]').forEach(select => select.addEventListener('change', async event => { try { await updateCloudOrder(event.target.dataset.orderStatus, event.target.value); showToast('تم تحديث حالة الطلب'); } catch (error) { showToast('تعذر تحديث الطلب'); } })); } catch (error) { showToast('تعذر تحميل الطلبات'); } }
 function showModal(content) { const modal = document.createElement('div'); modal.className = 'modal-backdrop'; modal.innerHTML = `<div class="modal">${content}</div>`; modal.addEventListener('click', event => { if (event.target === modal || event.target.closest('[data-close]')) closeModal(); }); document.body.appendChild(modal); }
 function closeModal() { document.querySelector('.modal-backdrop')?.remove(); }
 function showToast(message) { const toast = document.createElement('div'); toast.className = 'toast'; toast.textContent = message; document.body.appendChild(toast); setTimeout(() => toast.remove(), 2400); }
