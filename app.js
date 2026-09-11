@@ -19,6 +19,7 @@ let session = JSON.parse(localStorage.getItem('severus-by-anfal-session') || 'nu
 let cart = JSON.parse(localStorage.getItem('severus-by-anfal-cart') || '[]');
 let selectedCategory = 'الكل';
 let cloudSyncTimer;
+let pendingAuth = null;
 
 const app = document.querySelector('#app');
 if (localStorage.getItem('severus-theme') === 'dark') document.body.classList.add('blue-dark');
@@ -26,6 +27,17 @@ const save = () => localStorage.setItem(storageKey, JSON.stringify(state));
 const saveSession = () => localStorage.setItem('severus-by-anfal-session', JSON.stringify(session));
 const saveCart = () => localStorage.setItem('severus-by-anfal-cart', JSON.stringify(cart));
 const supabaseHeaders = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' };
+function normalizePhone(phone) { const value = phone.replace(/[\s()-]/g, ''); return value.startsWith('05') ? `+966${value.slice(1)}` : value.startsWith('5') ? `+966${value}` : value; }
+async function sendAuthCode(phone, isSignup) {
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/otp`, { method: 'POST', headers: supabaseHeaders, body: JSON.stringify({ phone, create_user: isSignup }) });
+  if (!response.ok) { const error = new Error('OTP request failed'); error.detail = await response.text(); throw error; }
+}
+async function verifyAuthCode(phone, token) {
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/verify`, { method: 'POST', headers: supabaseHeaders, body: JSON.stringify({ phone, token, type: 'sms' }) });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.msg || body.error_description || 'رمز التحقق غير صحيح');
+  return body;
+}
 async function supabaseRequest(path, options = {}) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: { ...supabaseHeaders, ...(options.headers || {}) } });
   if (!response.ok) {
@@ -111,7 +123,7 @@ function showSettings() {
 
 function authView(mode = 'login') {
   const isSignup = mode === 'signup';
-  app.innerHTML = `<main class="auth-shell"><section class="auth-card"><div class="auth-art"><div class="brand">${logo()}<span>SeverusByAnfal</span></div><div><span class="art-badge">متجر رقمي بطابعك</span><h1>صممي حضورك.<br>وخلي الباقي علينا.</h1><p>مكان واحد لعرض منتجاتك الرقمية، استقبال طلباتك، وإدارة متجرك بهدوء.</p></div><small>دخول آمن برقم الجوال</small></div><div class="auth-form"><span class="eyebrow">${isSignup ? 'مرحبًا بك' : 'عودة جميلة'}</span><h2>${isSignup ? 'إنشاء حساب جديد' : 'تسجيل الدخول'}</h2><p>${isSignup ? 'بيانات بسيطة ونبدأ معك مباشرة.' : 'اكتبي رقم جوالك للوصول إلى متجرك.'}</p><form id="auth-form"><label class="field">رقم الجوال<input name="phone" type="tel" inputmode="tel" placeholder="05xxxxxxxx" pattern="[0-9+ ]{9,15}" required></label>${isSignup ? '<label class="field">الاسم<input name="name" type="text" placeholder="اسمك" required></label><label class="field">الجنس<select name="gender" required><option value="">اختاري</option><option>أنثى</option><option>ذكر</option></select></label>' : ''}<button class="primary" type="submit">${isSignup ? 'إنشاء الحساب' : 'دخول المتجر'}</button></form><div class="auth-switch">${isSignup ? 'لديك حساب؟' : 'أول مرة هنا؟'} <button class="text-btn" data-auth-mode="${isSignup ? 'login' : 'signup'}">${isSignup ? 'تسجيل الدخول' : 'إنشاء حساب'}</button></div></div></section></main>`;
+  app.innerHTML = `<main class="auth-shell"><section class="auth-card"><div class="auth-art"><div class="brand">${logo()}<span>SeverusByAnfal</span></div><div><span class="art-badge">متجر رقمي بطابعك</span><h1>صممي حضورك.<br>وخلي الباقي علينا.</h1><p>مكان واحد لعرض منتجاتك الرقمية، استقبال طلباتك، وإدارة متجرك بهدوء.</p></div><small>دخول آمن برقم الجوال</small></div><div class="auth-form"><span class="eyebrow">${isSignup ? 'مرحبًا بك' : 'عودة جميلة'}</span><h2>${isSignup ? 'إنشاء حساب جديد' : 'تسجيل الدخول'}</h2><p>${isSignup ? 'بيانات بسيطة ونبدأ معك مباشرة.' : 'اكتبي رقم جوالك وسيصلك رمز تحقق SMS.'}</p><form id="auth-form"><label class="field">رقم الجوال<input name="phone" type="tel" inputmode="tel" placeholder="05xxxxxxxx" pattern="[0-9+ ]{9,15}" required></label>${isSignup ? '<label class="field">الاسم<input name="name" type="text" placeholder="اسمك" required></label><label class="field">الجنس<select name="gender" required><option value="">اختاري</option><option>أنثى</option><option>ذكر</option></select></label>' : ''}<button class="primary" type="submit">إرسال رمز التحقق</button></form><div class="auth-switch">${isSignup ? 'لديك حساب؟' : 'أول مرة هنا؟'} <button class="text-btn" data-auth-mode="${isSignup ? 'login' : 'signup'}">${isSignup ? 'تسجيل الدخول' : 'إنشاء حساب'}</button></div></div></section></main>`;
   document.querySelector('#auth-form').addEventListener('submit', handleAuth);
   document.querySelector('[data-auth-mode]').addEventListener('click', event => authView(event.currentTarget.dataset.authMode));
 }
@@ -119,20 +131,20 @@ function authView(mode = 'login') {
 async function handleAuth(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget));
-  const phone = data.phone.replace(/\s/g, '');
-  if (phone === OWNER_PHONE) session = { phone, name: 'صاحبة المتجر', isOwner: true };
-  else if (event.currentTarget.querySelector('[name="name"]')) {
-    const existing = state.users.find(user => user.phone === phone);
-    if (!existing) { state.users.push({ phone, name: data.name, gender: data.gender }); save(); }
-    session = { phone, name: existing?.name || data.name, isOwner: false };
-  } else {
-    const existing = state.users.find(user => user.phone === phone);
-    if (!existing) return showToast('هذا الرقم غير مسجل، أنشئي حسابًا أولًا');
-    session = { phone, name: existing.name, isOwner: false };
-  }
-  saveSession();
-  await loadCloudState();
-  renderStore();
+  const phone = normalizePhone(data.phone);
+  try { await sendAuthCode(phone, Boolean(data.name)); pendingAuth = { phone, name: data.name || '', gender: data.gender || '', isSignup: Boolean(data.name) }; authCodeView(); } catch (error) { console.error(error); showToast('تعذر إرسال رمز SMS، تأكدي من تفعيل مزود الرسائل في Supabase'); }
+}
+
+function authCodeView() {
+  app.innerHTML = `<main class="auth-shell"><section class="auth-card"><div class="auth-art"><div class="brand">${logo()}<span>SeverusByAnfal</span></div><div><span class="art-badge">رمز تحقق SMS</span><h1>خطوة واحدة<br>وتدخلين متجرك.</h1><p>أرسلنا رمز التحقق إلى ${escapeHtml(pendingAuth.phone)}.</p></div><small>لا تشاركي الرمز مع أي شخص</small></div><div class="auth-form"><span class="eyebrow">تحقق من الرقم</span><h2>أدخلي الرمز</h2><p>اكتبي الرمز المكون من 6 أرقام المرسل إلى جوالك.</p><form id="code-form"><label class="field">رمز التحقق<input name="token" inputmode="numeric" pattern="[0-9]{4,8}" maxlength="8" autocomplete="one-time-code" required></label><button class="primary" type="submit">تأكيد الدخول</button></form><div class="auth-switch"><button class="text-btn" data-back-auth>تغيير رقم الجوال</button></div></div></section></main>`;
+  document.querySelector('#code-form').addEventListener('submit', verifyAuth);
+  document.querySelector('[data-back-auth]').addEventListener('click', () => authView(pendingAuth.isSignup ? 'signup' : 'login'));
+}
+
+async function verifyAuth(event) {
+  event.preventDefault();
+  const token = new FormData(event.currentTarget).get('token');
+  try { await verifyAuthCode(pendingAuth.phone, token); const localPhone = pendingAuth.phone.replace('+966', '0'); if (pendingAuth.isSignup) { state.users.push({ phone: localPhone, name: pendingAuth.name, gender: pendingAuth.gender }); save(); } session = { phone: localPhone, name: pendingAuth.name || state.users.find(user => user.phone === localPhone)?.name || 'عميل', isOwner: localPhone === OWNER_PHONE }; pendingAuth = null; saveSession(); await loadCloudState(); renderStore(); } catch (error) { console.error(error); showToast('رمز التحقق غير صحيح أو منتهي'); }
 }
 
 function categories() { return ['الكل', ...new Set(state.categories.length ? state.categories : state.products.map(product => product.category))]; }
