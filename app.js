@@ -33,7 +33,8 @@ async function supabaseRequest(path, options = {}) {
     error.detail = await response.text();
     throw error;
   }
-  return response.status === 204 ? null : response.json();
+  const body = await response.text();
+  return body ? JSON.parse(body) : null;
 }
 async function loadCloudState() {
   try {
