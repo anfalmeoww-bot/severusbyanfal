@@ -17,6 +17,12 @@ create table if not exists public.products (
 alter table public.categories enable row level security;
 alter table public.products enable row level security;
 
+drop policy if exists "public can read categories" on public.categories;
+drop policy if exists "public can add categories" on public.categories;
+drop policy if exists "public can read products" on public.products;
+drop policy if exists "public can add products" on public.products;
+drop policy if exists "public can delete products" on public.products;
+
 create policy "public can read categories" on public.categories for select to anon using (true);
 create policy "public can add categories" on public.categories for insert to anon with check (true);
 create policy "public can read products" on public.products for select to anon using (true);
