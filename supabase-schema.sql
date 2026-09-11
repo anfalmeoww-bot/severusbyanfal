@@ -35,8 +35,15 @@ insert into public.categories (name) values
   ('قوالب جاهزة')
 on conflict (name) do nothing;
 
-insert into public.products (name, category, price, symbol, description) values
+delete from public.products
+where id not in (select min(id) from public.products group by name);
+
+insert into public.products (name, category, price, symbol, description)
+select seed.name, seed.category, seed.price, seed.symbol, seed.description
+from (values
   ('حزمة تنبيهات سماوية', 'تصاميم اليرتات', 39, '✦', 'مجموعة تنبيهات أنيقة لبثك بتفاصيل سماوية هادئة.'),
   ('هوية بث ليلية', 'هويات البث', 79, '◌', 'هوية متكاملة تمنح قناتك حضورًا واضحًا ومميزًا.'),
   ('شارات أعضاء الغزال', 'تصاميم اليرتات', 25, '♢', 'شارات عضوية متناسقة بتفاصيل ناعمة لعائلتك.'),
-  ('قوالب منشورات', 'قوالب جاهزة', 29, '▦', 'قوالب مرنة وسريعة لتجهيز منشوراتك اليومية.');
+  ('قوالب منشورات', 'قوالب جاهزة', 29, '▦', 'قوالب مرنة وسريعة لتجهيز منشوراتك اليومية.')
+) as seed(name, category, price, symbol, description)
+where not exists (select 1 from public.products existing where existing.name = seed.name);
